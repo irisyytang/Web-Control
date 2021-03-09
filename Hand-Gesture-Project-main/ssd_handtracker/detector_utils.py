@@ -6,19 +6,20 @@ import sys
 import tensorflow as tf
 import os
 from threading import Thread
-from datetime import datetime
+#from datetime import datetime
+import datetime
 import cv2
 import label_map_util
 from collections import defaultdict
-import coordinates
+
 # #import mouse
 from pynput.mouse import Button, Controller
 import numpy as np
 import wx
 
-coordinates.init()
+#coordinates.init()
 mouse = Controller()
-(camx, camy) = (320, 240)
+(camx, camy) = (900, 600)
 (sx, sy) = (1280, 800)
 
 detection_graph = tf.Graph()
@@ -28,7 +29,7 @@ sys.path.append("..")
 _score_thresh = 0.3
 
 # Change these to your directories
-PATH_TO_CKPT = "frozen_inference_graphs/frozen_inference_graph_30k.pb"
+PATH_TO_CKPT = "frozen_inference_graphs/frozen_inference_graph_v2_22.5k.pb"
 PATH_TO_LABELS = "hand_label_map.pbtxt"
 
 NUM_CLASSES = 1  # We only want to detect hands - don't change this!
@@ -38,6 +39,7 @@ label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
 categories = label_map_util.convert_label_map_to_categories(
     label_map, max_num_classes=NUM_CLASSES, use_display_name=True)
 category_index = label_map_util.create_category_index(categories)
+
 
 # Loads frozen inference graph
 def load_inference_graph():
@@ -55,10 +57,14 @@ def load_inference_graph():
     return detection_graph, sess
 
 
-# Draws bounding boxes
+hand_pos = (0, 0)
+timestamp = datetime.datetime.now()
+
+
+# Draw bounding boxes
 def draw_box_on_image(num_hands_detect, score_thresh, scores, boxes, im_width, im_height, image_np):
-    
-    ##oldPosition = (0,0)
+    global hand_pos
+    global timestamp
 
     for i in range(num_hands_detect):
         if (scores[i] > score_thresh):
@@ -66,8 +72,7 @@ def draw_box_on_image(num_hands_detect, score_thresh, scores, boxes, im_width, i
                                           boxes[i][0] * im_height, boxes[i][2] * im_height)
             p1 = (int(left), int(top))
             p2 = (int(right), int(bottom))
-
-            # print("top:: ", top)
+            #print("left: {0}, right: {1}, top: {2}, bottom: {3}".format(left, right, top, bottom))
 
             # Light green bounding box
             cv2.rectangle(image_np, p1, p2, (77, 255, 9), 3, 1)
@@ -75,27 +80,94 @@ def draw_box_on_image(num_hands_detect, score_thresh, scores, boxes, im_width, i
             # Compute center of bounding box
             cX = int((left+right)/2)
             cY = int((top+bottom)/2)
-            print("(cX, cY): ", cX, cY)
-            # mouse.position = (678, 634)
-            #mouse move
-            mouseLoc=(cX*sx/camx, cY*sy/camy)
-            print("3.mouse location:", mouseLoc)
-            #if((np.subtract(oldPosition,mouseLoc))[0]>5 or (np.subtract(oldPosition,mouseLoc))[1]>5):
-            
-            mouse.position = mouseLoc
-            #oldPosition = mouse.position
-            
-            print("1. Mouse Moved to:", mouse.position)
-            
-            # while mouse.position!=mouseLoc:
-            #     pass
-            
+
+            '''If after 2 seconds, the center has not moved 10% past its starting position (cX, cY)
+            double click'''
+            if (datetime.datetime.now() - timestamp).total_seconds() >= 2:
+                if (cX < hand_pos[0] + 0.1*(im_width) and cX > hand_pos[0] - 0.1*(im_width)
+                        and cY < hand_pos[1] + 0.1*(im_height) and cY > hand_pos[1] - 0.1*(im_height)):
+                    print("Hand has not moved.")
+                    timestamp = datetime.datetime.now()
+                    mouse.click(Button.left, 2)
+                else:
+                    hand_pos = (cX, cY)
+                    timestamp = datetime.datetime.now()
+                    print("Hand is moving.")
+                    mouseLoc=(cX*sx/camx, cY*sy/camy)
+                    mouse.position = mouseLoc
+                    #mouse.move(5,-5)
+
+                    print('hand_pos: ', hand_pos)
+                    print('mouse_loc: ', mouseLoc)
+
+            # Iris' Game
+            # a_d_move(image_np, cX, cY, 0, 400)
+            '''
+            move_left_right(image_np, cX, cY, 0, 400)
+            move_up_down(image_np, cX, cY, 0, 225)
+            '''
+
             # Label center of bounding box
-            cv2.circle(image_np, (cX, cY), 10, (255, 255, 255), -1)
+            cv2.circle(image_np, (cX, cY), 10, (0, 0, 0), -1)
             cv2.putText(image_np, f"Center: ({cX}, {cY})", (cX - 20, cY - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            
-            
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+
+
+keyboard = Controller()
+
+
+# Test code for Iris' Game
+def a_d_move(frame, hand_pos_x, hand_pos_y, max_left, max_right):
+    ''' It goes | 40% | 20% | 40% | '''
+    if hand_pos_x < 0.4*(max_right - max_left):
+        keyboard.press("a")
+        keyboard.release("a")
+        cv2.putText(frame, "Move left", (hand_pos_x - 20, hand_pos_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    elif hand_pos_x > 0.6*(max_right - max_left):
+        keyboard.press("d")
+        keyboard.release("d")
+        cv2.putText(frame, "Move right", (hand_pos_x - 20, hand_pos_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    else:
+        cv2.putText(frame, "No movement", (hand_pos_x - 20, hand_pos_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+
+def move_left_right(frame, hand_pos_x, hand_pos_y, max_left, max_right):
+    ''' It goes | 40% | 20% | 40% | '''
+    if hand_pos_x < 0.4*(max_right - max_left):
+        keyboard.press(Key.left)
+        keyboard.release(Key.left)
+        cv2.putText(frame, "Move left", (hand_pos_x - 20, hand_pos_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    elif hand_pos_x > 0.6*(max_right - max_left):
+        keyboard.press(Key.right)
+        keyboard.release(Key.right)
+        cv2.putText(frame, "Move right", (hand_pos_x - 20, hand_pos_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    else:
+        cv2.putText(frame, "No movement", (hand_pos_x - 20, hand_pos_y - 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+
+def move_up_down(frame, hand_pos_x, hand_pos_y, max_left, max_right):
+    ''' It goes: 40%
+                 20%
+                 40% '''
+    if hand_pos_y < 0.4*(max_right - max_left):
+        keyboard.press(Key.up)
+        keyboard.release(Key.up)
+        cv2.putText(frame, "Move up", (hand_pos_x - 20, hand_pos_y - 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    elif hand_pos_y > 0.6*(max_right - max_left):
+        keyboard.press(Key.down)
+        keyboard.release(Key.down)
+        cv2.putText(frame, "Move down", (hand_pos_x - 20, hand_pos_y - 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    else:
+        cv2.putText(frame, "No movement", (hand_pos_x - 20, hand_pos_y - 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
 
 # Displays FPS in light green
